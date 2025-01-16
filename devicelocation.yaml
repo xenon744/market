@@ -1,0 +1,391 @@
+openapi: 3.0.3
+info:
+  title: Device location verification API
+  description: |
+  version: 0.2.0
+externalDocs:
+  description: Product documentation at CAMARA
+  url: https://github.com/camaraproject/
+servers:
+  - url: "{apiRoot}/location-verification/v0"
+    variables:
+      apiRoot:
+        default: http://localhost:9091
+        description: API root
+paths:
+  /verify:
+    post:
+      description: |
+        Verify whether the location of a device is within a requested area. The operation returns a verification result and, optionally, a match rate estimation for the location verification in percent.
+      operationId: Verify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyLocationRequest"
+            examples:
+              INPUT_PHONE_NUMBER_CIRCLE:
+                summary: Phone number, circle and maxAge
+                description: Verify if device identified by a phone number is within a circle, providing a maxAge
+                value:
+                  device:
+                    phoneNumber: "+123456789"
+                  area:
+                    areaType: CIRCLE
+                    center:
+                      latitude: 50.735851
+                      longitude: 7.10066
+                    radius: 50000
+                  maxAge: 120
+              INPUT_IP_ADDRESS_V4_CIRCLE:
+                summary: IPv4 address, circle, without maxAge
+                description: Verify if device identified by an IPv4 address is within a circle
+                value:
+                  device:
+                    ipv4Address:
+                      publicAddress: 123.234.1.2
+                      publicPort: 1234
+                  area:
+                    areaType: CIRCLE
+                    center:
+                      latitude: 50.735851
+                      longitude: 7.10066
+                    radius: 50000
+      responses:
+        "200":
+          description: Location verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyLocationResponse"
+              examples: 
+                VERIFICATION_TRUE:
+                  summary: Match
+                  description: The network locates the device within the requested area
+                  value:
+                    verificationResult: "TRUE"
+                    lastLocationTime: 2023-09-07T10:40:52Z
+                VERIFICATION_FALSE:
+                  summary: No match
+                  description: The requested area does not match the area where the network locates the device
+                  value:
+                    verificationResult: "FALSE"
+                    lastLocationTime: 2023-09-07T10:40:52Z 
+                VERIFICATION_UNKNOWN_WITH_LAST_LOCATION_TIME:
+                  summary: Unknown with last location time
+                  description: The network cannot locate the device after the requested maxAge
+                  value:
+                    verificationResult: "UNKNOWN"
+                    lastLocationTime: 2023-09-07T10:40:52Z
+                VERIFICATION_UNKNOWN_WITHOUT_LAST_LOCATION_TIME:
+                  summary: Unknown without last location time
+                  description: The network cannot locate the device and there is no history available 
+                  value:
+                    verificationResult: "UNKNOWN"
+                VERIFICATION_PARTIAL:
+                  summary: Partial match
+                  description: The requested area partially matches the area where the network locates the device
+                  value:
+                    verificationResult: "PARTIAL" 
+                    matchRate: 74
+                    lastLocationTime: 2023-09-07T10:40:52Z
+        "400":
+          $ref: "#/components/responses/Generic400"
+        "401":
+          $ref: "#/components/responses/Generic401"
+        "403":
+          $ref: "#/components/responses/Generic403"
+        "404":
+          $ref: "#/components/responses/Generic404"
+        "500":
+          $ref: "#/components/responses/Generic500"
+        "503":
+          $ref: "#/components/responses/Generic503"
+      security:
+        - openId:
+          - location-verification:verify
+components:
+  securitySchemes:
+    openId:
+      type: openIdConnect
+      openIdConnectUrl: https://example.org/.well-known/openid-configuration
+  schemas:
+    Area:
+      type: object
+      properties:
+        areaType:
+          $ref: "#/components/schemas/AreaType"
+      required:
+        - areaType
+      discriminator:
+        propertyName: areaType
+        mapping:
+          CIRCLE: "#/components/schemas/Circle"
+
+    AreaType:
+      type: string
+      description: |
+        Type of this area.
+        CIRCLE - The area is defined as a circle.
+      enum:
+        - CIRCLE
+
+    Circle:
+      description: Circular area
+      allOf:
+        - $ref: "#/components/schemas/Area"
+        - type: object
+          properties:
+            center:
+              $ref: "#/components/schemas/Point"
+            radius:
+              type: integer
+              description: Expected accuracy for the verification in meters, from location (radius)
+              minimum: 2000
+              maximum: 200000
+          required:
+            - center
+            - radius
+      example:
+        areaType: CIRCLE
+        center:
+          latitude: 50.735851
+          longitude: 7.10066
+        radius: 50000
+    Point:
+      type: object
+      description: Coordinates (latitude, longitude) defining a location in a map
+      required: 
+        - latitude
+        - longitude
+      properties: 
+        latitude:
+          $ref: "#/components/schemas/Latitude"
+        longitude:
+          $ref: "#/components/schemas/Longitude"
+      example: 
+        latitude: 50.735851
+        longitude: 7.10066
+    Latitude:
+      description: Latitude component of a location
+      type: number
+      format: double
+      minimum: -90
+      maximum: 90
+      example: 50.735851      
+    Longitude:
+      description: Longitude component of location
+      type: number
+      format: double
+      minimum: -180
+      maximum: 180
+      example: 7.10066        
+    VerifyLocationRequest:
+      type: object
+      properties:
+        device:
+          $ref: "#/components/schemas/Device"
+        area:
+          $ref: "#/components/schemas/Area"
+        maxAge:
+          $ref: "#/components/schemas/MaxAge"
+      required:
+        - device
+        - area
+
+    VerifyLocationResponse:
+      type: object
+      required:
+        - verificationResult
+      properties:
+        lastLocationTime:
+          $ref: "#/components/schemas/LastLocationTime"
+        verificationResult:
+          $ref: "#/components/schemas/VerificationResult"
+        matchRate:
+          $ref: "#/components/schemas/MatchRate"
+
+    Device:
+      description: |
+        End-user equipment able to connect to a mobile network. Examples of devices include smartphones or IoT sensors/actuators.
+
+        The developer can choose to provide the below specified device identifiers:
+
+        * `ipv4Address`
+        * `ipv6Address`
+        * `phoneNumber`
+        * `networkAccessIdentifier`
+
+        NOTE: the MNO might support only a subset of these options. The API invoker can provide multiple identifiers to be compatible across different MNOs. In this case the identifiers MUST belong to the same device.
+      type: object
+      properties:
+        phoneNumber:
+          $ref: "#/components/schemas/PhoneNumber"
+        networkAccessIdentifier:
+          $ref: "#/components/schemas/NetworkAccessIdentifier"
+        ipv4Address:
+          $ref: "#/components/schemas/DeviceIpv4Addr"
+        ipv6Address:
+          $ref: "#/components/schemas/DeviceIpv6Address"
+      minProperties: 1
+
+    PhoneNumber:
+      description: A public identifier addressing a telephone subscription. In mobile networks it corresponds to the MSISDN (Mobile Station International Subscriber Directory Number). In order to be globally unique it has to be formatted in international format, according to E.164 standard, optionally prefixed with '+'.
+      type: string
+      pattern: '^\+?[0-9]{5,15}$'
+      example: "123456789"
+
+    NetworkAccessIdentifier:
+      description: A public identifier addressing a subscription in a mobile network. In 3GPP terminology, it corresponds to the GPSI formatted with the External Identifier ({Local Identifier}@{Domain Identifier}). Unlike the telephone number, the network access identifier is not subjected to portability ruling in force, and is individually managed by each operator.
+      type: string
+      example: "123456789@domain.com"
+
+    DeviceIpv4Addr:
+      type: object
+      description: |
+        The device should be identified by either the public (observed) IP address and port as seen by the application server, or the private (local) and any public (observed) IP addresses in use by the device (this information can be obtained by various means, for example from some DNS servers).
+
+        If the allocated and observed IP addresses are the same (i.e. NAT is not in use) then  the same address should be specified for both publicAddress and privateAddress.
+
+        If NAT64 is in use, the device should be identified by its publicAddress and publicPort, or separately by its allocated IPv6 address (field ipv6Address of the Device object)
+
+        In all cases, publicAddress must be specified, along with at least one of either privateAddress or publicPort, dependent upon which is known. In general, mobile devices cannot be identified by their public IPv4 address alone.
+      properties:
+        publicAddress:
+          $ref: "#/components/schemas/SingleIpv4Addr"
+        privateAddress:
+          $ref: "#/components/schemas/SingleIpv4Addr"
+        publicPort:
+          $ref: "#/components/schemas/Port"
+      anyOf:
+        - required: [publicAddress, privateAddress]
+        - required: [publicAddress, publicPort]
+      example:
+        publicAddress: "84.125.93.10"
+        publicPort: 59765
+
+    SingleIpv4Addr:
+      description: A single IPv4 address with no subnet mask
+      type: string
+      format: ipv4
+      example: "84.125.93.10"
+
+    Port:
+      description: TCP or UDP port number
+      type: integer
+      minimum: 0
+      maximum: 65535
+
+    DeviceIpv6Address:
+      description: |
+        The device should be identified by the observed IPv6 address, or by any single IPv6 address from within the subnet allocated to the device (e.g. adding ::0 to the /64 prefix).
+      type: string
+      format: ipv6
+      example: 2001:db8:85a3:8d3:1319:8a2e:370:7344
+      
+    MaxAge:
+      description: The maximum age (in seconds) of the available location, which is accepted for the verification.
+      type: integer
+      minimum: 60
+      example: 120
+    VerificationResult:
+      description: |
+        Result of a verification request:
+          - `TRUE`: when the network locates the device within the requested area, 
+          - `FALSE`: when the requested area does not match the area where the network locates the device,
+          - `UNKNOWN`: when the network cannot locate the device,
+          - `PARTIAL`: when the requested area partially match the area where the network locates the device. A `match_rate` could be included in the response.
+      type: string
+      enum:
+        - "TRUE"
+        - "FALSE"
+        - "UNKNOWN"
+        - "PARTIAL"
+    MatchRate:
+      description: Estimation of the match rate between the area in the request (R), and area where the network locates the device (N), calculated as the percent value of the intersection of both areas divided by the network area, that is (R ∩ N) / N * 100. Included only if VerificationResult is PARTIAL.
+      type: integer
+      minimum: 1
+      maximum: 99
+    LastLocationTime:
+      description: Timestamp of the last location information. It must follow RFC 3339 and must have time zone. Recommended format is yyyy-MM-dd'T'HH:mm:ss.SSSZ (i.e. which allows 2023-07-03T14:27:08.312+02:00 or 2023-07-03T12:27:08.312Z)
+      example: "2023-09-07T10:40:52Z"
+      format: date-time
+      type: string
+    ErrorInfo:
+      type: object
+      required:
+        - status
+        - code
+        - message
+      properties:
+        status:
+          type: integer
+          description: HTTP status code returned along with this error response
+        code:
+          type: string
+          description: Code given to this error
+        message:
+          type: string
+          description: Detailed error description
+  responses:
+    Generic400:
+      description: Invalid argument
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 400
+            code: INVALID_ARGUMENT
+            message: Invalid argument
+    Generic401:
+      description: Unauthenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 401
+            code: UNAUTHENTICATED
+            message: "Authorization failed: ..."
+    Generic403:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 403
+            code: PERMISSION_DENIED
+            message: "Operation not allowed: ..."
+    Generic404:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 404
+            code: NOT_FOUND
+            message: "The specified resource is not found"
+    Generic500:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 500
+            code: INTERNAL
+            message: "Internal server error"
+    Generic503:
+      description: Service unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorInfo"
+          example:
+            status: 503
+            code: UNAVAILABLE
+            message: "Service unavailable"
